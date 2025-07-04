@@ -1,0 +1,13 @@
+{
+    "milvus_uri": "https://in03-d72854861ccd816.serverless.ali-cn-hangzhou.cloud.zilliz.com.cn",
+    "milvus_token": "c99439b32ae14205eba424ccd8a4d75941bb443ec3a283d3034b44ac2f0b501f42eb5ecc14722d746b56764288c708c4c12251fa",
+    "collection_names": [
+        "llm_default"
+    ],
+    "embedding_model": "text-embedding-v3",
+    "embedding_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "embedding_model_token": "sk-285b429c7c1f4baaa9f87fe0f3ba8bf7",
+    "rerank_base_url": "https://api.siliconflow.cn/v1/rerank",
+    "rerank_model_token":"sk-cmrzjaymuddigrmkfzjnjphxnacnpfprsojjdmzsqwjrsrfz",
+    "rerank_model": "BAAI/bge-reranker-v2-m3"
+}
