@@ -9,5 +9,8 @@
     "embedding_model_token": "sk-285b429c7c1f4baaa9f87fe0f3ba8bf7",
     "rerank_base_url": "https://api.siliconflow.cn/v1/rerank",
     "rerank_model_token":"sk-cmrzjaymuddigrmkfzjnjphxnacnpfprsojjdmzsqwjrsrfz",
-    "rerank_model": "BAAI/bge-reranker-v2-m3"
+    "rerank_model": "BAAI/bge-reranker-v2-m3",
+    "dense_search_limit": 10,
+    "sparse_search_limit": 10,
+    "search_total_budget": 4000
 }
