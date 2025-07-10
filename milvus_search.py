@@ -89,7 +89,9 @@ class MilvusDocCache:
         )
 
         # refresh the cache
-        for entity in upper_results + lower_results:
+        for entity in upper_results:
+            self.cache[entity.get('doc_id')] = entity
+        for entity in lower_results:
             self.cache[entity.get('doc_id')] = entity
         if upper_results and len(upper_results) > 0:
             self.start_position = upper_results[0].get('id', self.pivot_id)

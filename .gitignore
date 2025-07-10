@@ -5,3 +5,5 @@
 *.pyd
 *.db
 *.sqlite
+*.tar
+*.tar.gz
