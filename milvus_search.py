@@ -727,6 +727,124 @@ else:
     logger.warning(f"配置文件 {config_path} 不存在，请检查路径或创建配置文件。")
     exit(1)
 
+def dense_search(query_test:str)->List[Dict]:
+    milvus_uri = global_config.get('milvus_uri', 'localhost')
+    milvus_token = global_config.get('milvus_token', 'your_milvus_token')
+    collection_names = global_config.get('collection_names', ['your_collection_name'])
+    embedding_model = global_config.get('embedding_model', 'bge-m3')
+    embedding_base_url = global_config.get('embedding_base_url', 'http://localhost:6001/v1')
+    embedding_model_token = global_config.get('embedding_model_token', 'your_embedding_model_token')
+    rerank_base_url = global_config.get('rerank_base_url')
+    rerank_model_token = global_config.get('rerank_model_token')
+    rerank_model = global_config.get('rerank_model')
+    dense_search_limit = global_config.get('dense_search_limit', 10)
+    search_total_budget = global_config.get('search_total_budget', 4000)
+    pool = get_global_pool(max_pool_size=10, max_idle_time=300)
+    with pool.get_instance_context(
+        uri=milvus_uri, 
+        token=milvus_token, 
+        collection_name=collection_names[0]
+    ) as milvus_search:
+        results_dense = []
+        embedding_success, embedding_results, message = get_embedding(
+            text=[query_test],
+            model=embedding_model,
+            base_url=embedding_base_url,
+            api_key=embedding_model_token)
+        if embedding_success:
+            results_dense = milvus_search.search_dense(embedding=embedding_results[0], limit=dense_search_limit)
+        rrf_result = milvus_search.rrf_fusion(results_sparse=[], results_dense=results_dense)
+        allocated_budgets, total_token_results, doc_total_score = milvus_search.allocate_document_budgets(rrf_fusion_results=rrf_result, total_budget=search_total_budget, strategy="proportional")
+        for doc_id, budget in allocated_budgets.items():
+            if doc_id in total_token_results:
+                if total_token_results[doc_id] < budget:
+                    allocated_budgets[doc_id] = total_token_results[doc_id] * 1.25
+        
+        search_re = milvus_search.result_merge_to_segments(rrf_fusion_results=rrf_result, doc_budget=allocated_budgets, rrf_doc_id_total_score=doc_total_score)
+        document_list = []
+        doc_rerank_index = {}
+        for doc_id ,result in search_re.items():
+            for segment in result:
+                brief_context = segment.get('brief_context', '')
+                document_list.append(brief_context)
+                rerank_id = f"{len(document_list)-1}"
+                doc_rerank_index[rerank_id] = segment
+
+        flag, results_rerank, msg = rerank_documents(
+            url=rerank_base_url,
+            query=query_test,
+            documents=document_list,
+            model=rerank_model,
+            token=rerank_model_token
+        )
+        
+        if not flag:
+            logger.error(f"Rerank failed: {msg}")
+            return []
+        final_results = []
+        for idx, result in enumerate(results_rerank):
+            rerank_id = f"{idx}"
+            segment = doc_rerank_index.get(rerank_id, {})
+            segment['score'] = result.get('relevance_score', 0.0)
+            segment['id'] = rerank_id
+            final_results.append(segment)
+
+        return final_results
+
+def sparse_search(query_test:str) -> List[Dict]:
+    milvus_uri = global_config.get('milvus_uri', 'localhost')
+    milvus_token = global_config.get('milvus_token', 'your_milvus_token')
+    collection_names = global_config.get('collection_names', ['your_collection_name'])
+    sparse_search_limit = global_config.get('sparse_search_limit', 10)
+    rerank_base_url = global_config.get('rerank_base_url')
+    rerank_model_token = global_config.get('rerank_model_token')
+    rerank_model = global_config.get('rerank_model')
+    search_total_budget = global_config.get('search_total_budget', 4000)
+    pool = get_global_pool(max_pool_size=10, max_idle_time=300)
+    with pool.get_instance_context(
+        uri=milvus_uri, 
+        token=milvus_token, 
+        collection_name=collection_names[0]
+    ) as milvus_search:
+        results_sparse = milvus_search.search_sparse(query=query_test, limit=sparse_search_limit)
+        rrf_result = milvus_search.rrf_fusion(results_sparse=results_sparse, results_dense=[])
+        allocated_budgets, total_token_results, doc_total_score = milvus_search.allocate_document_budgets(rrf_fusion_results=rrf_result, total_budget=search_total_budget, strategy="proportional")
+        for doc_id, budget in allocated_budgets.items():
+            if doc_id in total_token_results:
+                if total_token_results[doc_id] < budget:
+                    allocated_budgets[doc_id] = total_token_results[doc_id] * 1.25
+        
+        search_re = milvus_search.result_merge_to_segments(rrf_fusion_results=rrf_result, doc_budget=allocated_budgets, rrf_doc_id_total_score=doc_total_score)
+        document_list = []
+        doc_rerank_index = {}
+        for doc_id ,result in search_re.items():
+            for segment in result:
+                brief_context = segment.get('brief_context', '')
+                document_list.append(brief_context)
+                rerank_id = f"{len(document_list)-1}"
+                doc_rerank_index[rerank_id] = segment
+
+        flag, results_rerank, msg = rerank_documents(
+            url=rerank_base_url,
+            query=query_test,
+            documents=document_list,
+            model=rerank_model,
+            token=rerank_model_token
+        )
+        
+        if not flag:
+            logger.error(f"Rerank failed: {msg}")
+            return []
+        final_results = []
+        for idx, result in enumerate(results_rerank):
+            rerank_id = f"{idx}"
+            segment = doc_rerank_index.get(rerank_id, {})
+            segment['score'] = result.get('relevance_score', 0.0)
+            segment['id'] = rerank_id
+            final_results.append(segment)
+
+        return final_results
+
 def hybird_search(query_test:str) -> List[Dict]:
     # get config needed
     milvus_uri = global_config.get('milvus_uri', 'localhost')
@@ -933,6 +1051,40 @@ def search_endpoint(request: SearchRequest):
             result['brief_context_html'] = fix_table_structure_advanced(result['brief_context_html'])
         if 'total_context_html' in result:
             result['total_context_html'] = fix_table_structure_advanced(result['total_context_html'])
+    # 返回结果
+    return JSONResponse(content=results)
+
+@app.post("/search/dense")
+def dense_search_endpoint(request: SearchRequest):
+    results = dense_search(request.query)
+
+    if not results:
+        raise HTTPException(status_code=404, detail="No results found")
+    
+    # html fix
+    for result in results:
+        if 'brief_context_html' in result:
+            result['brief_context_html'] = fix_table_structure_advanced(result['brief_context_html'])
+        if 'total_context_html' in result:
+            result['total_context_html'] = fix_table_structure_advanced(result['total_context_html'])
+    
+    # 返回结果
+    return JSONResponse(content=results)
+
+@app.post("/search/sparse")
+def sparse_search_endpoint(request: SearchRequest):
+    results = sparse_search(request.query)
+
+    if not results:
+        raise HTTPException(status_code=404, detail="No results found")
+    
+    # html fix
+    for result in results:
+        if 'brief_context_html' in result:
+            result['brief_context_html'] = fix_table_structure_advanced(result['brief_context_html'])
+        if 'total_context_html' in result:
+            result['total_context_html'] = fix_table_structure_advanced(result['total_context_html'])
+    
     # 返回结果
     return JSONResponse(content=results)
 
