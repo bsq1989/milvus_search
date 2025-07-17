@@ -2,7 +2,8 @@
     "milvus_uri": "https://in03-d72854861ccd816.serverless.ali-cn-hangzhou.cloud.zilliz.com.cn",
     "milvus_token": "c99439b32ae14205eba424ccd8a4d75941bb443ec3a283d3034b44ac2f0b501f42eb5ecc14722d746b56764288c708c4c12251fa",
     "collection_names": [
-        "llm_default"
+        "llm_default",
+        "doc_summary_llm"
     ],
     "embedding_model": "text-embedding-v3",
     "embedding_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -12,5 +13,6 @@
     "rerank_model": "BAAI/bge-reranker-v2-m3",
     "dense_search_limit": 10,
     "sparse_search_limit": 10,
-    "search_total_budget": 4000
+    "search_total_budget": 4000,
+    "doc_filter_threshold": 0.5
 }

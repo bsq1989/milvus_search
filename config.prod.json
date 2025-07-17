@@ -2,7 +2,8 @@
     "milvus_uri": "http://llm-prod-milvus:19530",
     "milvus_token": "",
     "collection_names": [
-        "llm_default"
+        "llm_default",
+        "doc_summary_llm"
     ],
     "embedding_model": "bge-m3",
     "embedding_base_url": "http://17.192.8.20:4000/v1",
@@ -12,5 +13,6 @@
     "rerank_model": "bge-reranker-v2-m3",
     "dense_search_limit": 10,
     "sparse_search_limit": 10,
-    "search_total_budget": 4000
+    "search_total_budget": 4000,
+    "doc_filter_threshold": 0.5
 }

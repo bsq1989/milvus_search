@@ -103,7 +103,7 @@ class MilvusSearch:
     def __init__(self, uri:str, token: str, collection_name: str):
         self.milvus_db = MilvusVectorDB(uri=uri, token=token, collection_name=collection_name)
 
-    def search_sparse(self, query: str, limit: int = 10) -> list:
+    def search_sparse(self, query: str, limit: int = 10, filter_expression: str = None) -> list:
         """
         Perform a sparse search in the Milvus database.
 
@@ -111,9 +111,9 @@ class MilvusSearch:
         :param top_k: The number of top results to return.
         :return: A list of search results.
         """
-        return self.milvus_db.search_by_text_sparse(query_text=[query],limit=limit)
+        return self.milvus_db.search_by_text_sparse(query_text=[query],limit=limit, filter_expr=filter_expression)
 
-    def search_dense(self, embedding: list[float], limit: int = 10) -> list:
+    def search_dense(self, embedding: list[float], limit: int = 10, filter_expression: str = None) -> list:
         """
         Perform a dense search in the Milvus database.
 
@@ -121,8 +121,7 @@ class MilvusSearch:
         :param top_k: The number of top results to return.
         :return: A list of search results.
         """
-
-        return self.milvus_db.search_by_text_dense(query_vectors=[embedding],limit=limit)
+        return self.milvus_db.search_by_text_dense(query_vectors=[embedding],limit=limit, filter_expr=filter_expression)
     
     def rrf_fusion(self, results_sparse: list, results_dense: list, k: int = 60,
                    sparse_weight: float = 0.4, dense_weight: float = 0.6) -> list:
@@ -727,7 +726,20 @@ else:
     logger.warning(f"配置文件 {config_path} 不存在，请检查路径或创建配置文件。")
     exit(1)
 
-def dense_search(query_test:str)->List[Dict]:
+def make_filter_expression(doc_id_filters: List[str]) -> Optional[str]:
+    """
+    根据文档ID过滤器生成Milvus查询表达式。
+    
+    :param doc_id_filters: 文档ID过滤器列表。
+    :return: Milvus查询表达式字符串或None。
+    """
+    if not doc_id_filters:
+        return None
+    # 使用OR连接所有文档ID
+    filter_expression = ' OR '.join([f"doc_id like '{doc_id}%'" for doc_id in doc_id_filters])
+    return filter_expression if filter_expression else None
+
+def dense_search(query_test:str,doc_id_filters:List[str])->List[Dict]:
     milvus_uri = global_config.get('milvus_uri', 'localhost')
     milvus_token = global_config.get('milvus_token', 'your_milvus_token')
     collection_names = global_config.get('collection_names', ['your_collection_name'])
@@ -745,6 +757,9 @@ def dense_search(query_test:str)->List[Dict]:
         token=milvus_token, 
         collection_name=collection_names[0]
     ) as milvus_search:
+        filter_expression = None
+        if len(doc_id_filters) > 0:
+            filter_expression = make_filter_expression(doc_id_filters)
         results_dense = []
         embedding_success, embedding_results, message = get_embedding(
             text=[query_test],
@@ -752,7 +767,7 @@ def dense_search(query_test:str)->List[Dict]:
             base_url=embedding_base_url,
             api_key=embedding_model_token)
         if embedding_success:
-            results_dense = milvus_search.search_dense(embedding=embedding_results[0], limit=dense_search_limit)
+            results_dense = milvus_search.search_dense(embedding=embedding_results[0], limit=dense_search_limit, filter_expression=filter_expression)
         rrf_result = milvus_search.rrf_fusion(results_sparse=[], results_dense=results_dense)
         allocated_budgets, total_token_results, doc_total_score = milvus_search.allocate_document_budgets(rrf_fusion_results=rrf_result, total_budget=search_total_budget, strategy="proportional")
         for doc_id, budget in allocated_budgets.items():
@@ -782,8 +797,9 @@ def dense_search(query_test:str)->List[Dict]:
             logger.error(f"Rerank failed: {msg}")
             return []
         final_results = []
-        for idx, result in enumerate(results_rerank):
-            rerank_id = f"{idx}"
+        for result in results_rerank:
+            original_id = result.get('index', '')
+            rerank_id = f"{original_id}"
             segment = doc_rerank_index.get(rerank_id, {})
             segment['score'] = result.get('relevance_score', 0.0)
             segment['id'] = rerank_id
@@ -791,7 +807,7 @@ def dense_search(query_test:str)->List[Dict]:
 
         return final_results
 
-def sparse_search(query_test:str) -> List[Dict]:
+def sparse_search(query_test:str, doc_id_filters:List[str]) -> List[Dict]:
     milvus_uri = global_config.get('milvus_uri', 'localhost')
     milvus_token = global_config.get('milvus_token', 'your_milvus_token')
     collection_names = global_config.get('collection_names', ['your_collection_name'])
@@ -806,7 +822,10 @@ def sparse_search(query_test:str) -> List[Dict]:
         token=milvus_token, 
         collection_name=collection_names[0]
     ) as milvus_search:
-        results_sparse = milvus_search.search_sparse(query=query_test, limit=sparse_search_limit)
+        filter_expression = None
+        if len(doc_id_filters) > 0:
+            filter_expression = make_filter_expression(doc_id_filters)
+        results_sparse = milvus_search.search_sparse(query=query_test, limit=sparse_search_limit, filter_expression=filter_expression)
         rrf_result = milvus_search.rrf_fusion(results_sparse=results_sparse, results_dense=[])
         allocated_budgets, total_token_results, doc_total_score = milvus_search.allocate_document_budgets(rrf_fusion_results=rrf_result, total_budget=search_total_budget, strategy="proportional")
         for doc_id, budget in allocated_budgets.items():
@@ -836,8 +855,9 @@ def sparse_search(query_test:str) -> List[Dict]:
             logger.error(f"Rerank failed: {msg}")
             return []
         final_results = []
-        for idx, result in enumerate(results_rerank):
-            rerank_id = f"{idx}"
+        for result in results_rerank:
+            original_id = result.get('index', '')
+            rerank_id = f"{original_id}"
             segment = doc_rerank_index.get(rerank_id, {})
             segment['score'] = result.get('relevance_score', 0.0)
             segment['id'] = rerank_id
@@ -845,7 +865,7 @@ def sparse_search(query_test:str) -> List[Dict]:
 
         return final_results
 
-def hybird_search(query_test:str) -> List[Dict]:
+def hybird_search(query_test:str, doc_id_filters:List[str]) -> List[Dict]:
     # get config needed
     milvus_uri = global_config.get('milvus_uri', 'localhost')
     milvus_token = global_config.get('milvus_token', 'your_milvus_token')
@@ -865,7 +885,11 @@ def hybird_search(query_test:str) -> List[Dict]:
         token=milvus_token, 
         collection_name=collection_names[0]
     ) as milvus_search:
-        results_sparse = milvus_search.search_sparse(query=query_test, limit=sparse_search_limit)
+        # search doc first
+        filter_expression = None
+        if len(doc_id_filters) > 0:
+            filter_expression = make_filter_expression(doc_id_filters)
+        results_sparse = milvus_search.search_sparse(query=query_test, limit=sparse_search_limit, filter_expression=filter_expression)
 
         results_dense = []
         embedding_success, embedding_results, message = get_embedding(
@@ -874,7 +898,7 @@ def hybird_search(query_test:str) -> List[Dict]:
             base_url=embedding_base_url,
             api_key=embedding_model_token)
         if embedding_success:
-            results_dense = milvus_search.search_dense(embedding=embedding_results[0], limit=dense_search_limit)
+            results_dense = milvus_search.search_dense(embedding=embedding_results[0], limit=dense_search_limit, filter_expression=filter_expression)
 
         rrf_result = milvus_search.rrf_fusion(results_sparse=results_sparse, results_dense=results_dense)
         if len(rrf_result) == 0:
@@ -910,8 +934,9 @@ def hybird_search(query_test:str) -> List[Dict]:
             logger.error(f"Rerank failed: {msg}")
             return []
         final_results = []
-        for idx, result in enumerate(results_rerank):
-            rerank_id = f"{idx}"
+        for result in results_rerank:
+            original_id = result.get('index', '')
+            rerank_id = f"{original_id}"
             segment = doc_rerank_index.get(rerank_id, {})
             segment['score'] = result.get('relevance_score', 0.0)
             segment['id'] = rerank_id
@@ -919,6 +944,80 @@ def hybird_search(query_test:str) -> List[Dict]:
 
         return final_results
         
+
+def search_doc(query_text: str) -> List[Dict]:
+    """
+    搜索文档的主入口函数
+    根据配置文件中的设置，调用稀疏搜索或混合搜索
+    """
+    milvus_uri = global_config.get('milvus_uri', 'localhost')
+    milvus_token = global_config.get('milvus_token', 'your_milvus_token')
+    collection_names = global_config.get('collection_names', ['your_collection_name'])
+    embedding_model = global_config.get('embedding_model', 'bge-m3')
+    embedding_base_url = global_config.get('embedding_base_url', 'http://localhost:6001/v1')
+    embedding_model_token = global_config.get('embedding_model_token', 'your_embedding_model_token')
+    rerank_base_url = global_config.get('rerank_base_url')
+    rerank_model_token = global_config.get('rerank_model_token')
+    rerank_model = global_config.get('rerank_model')
+    dense_search_limit = global_config.get('dense_search_limit', 10)
+    doc_filter_threshold = global_config.get('doc_filter_threshold', 0.5)
+    pool = get_global_pool(max_pool_size=10, max_idle_time=300)
+    with pool.get_instance_context(
+        uri=milvus_uri, 
+        token=milvus_token, 
+        collection_name=collection_names[1]
+    ) as search_instance:
+        results_dense = []
+        embedding_success, embedding_results, message = get_embedding(
+            text=[query_text],
+            model=embedding_model,
+            base_url=embedding_base_url,
+            api_key=embedding_model_token)
+        if embedding_success:
+            results_dense = search_instance.search_dense(embedding=embedding_results[0], limit=dense_search_limit)
+        else:
+            logger.error(f"Doc search Embedding failed: {message}")
+            return []
+        document_list = []
+        doc_rerank_index = {}
+        for idx, result in enumerate(results_dense):
+            entity = result.get('entity', {})
+            if not entity:
+                logger.warning(f"Result {idx} has no entity, skipping.")
+                continue
+            summary = entity.get('text', '')
+            document_list.append(summary)
+            r_id = f"{idx}"
+            doc_rerank_index[r_id] = {
+                'id': entity.get('id', ''),
+                'doc_id': entity.get('doc_id', ''),
+                'doc_meta': entity.get('doc_meta', {}),
+                'summary': summary,
+                'distance': result.get('distance', 0.0)
+            }
+        
+        flag, results_rerank, msg = rerank_documents(
+            url=rerank_base_url,
+            query=query_text,
+            documents=document_list,
+            model=rerank_model,
+            token=rerank_model_token
+        )
+        if not flag:
+            logger.error(f"Doc search Rerank failed: {msg}")
+            return []
+        
+        final_results = []
+        for result in results_rerank:
+            original_id = result.get('index', '')
+            r_id = f"{original_id}"
+            segment = doc_rerank_index.get(r_id, {})
+            segment['score'] = result.get('relevance_score', 0.0)
+            final_results.append(segment)
+        filtered_results = [res for res in final_results if res['score'] >= doc_filter_threshold]
+        return filtered_results
+
+    
 
 
 def example_with_pool():
@@ -1041,7 +1140,14 @@ class SearchRequest(BaseModel):
 
 @app.post("/search")
 def search_endpoint(request: SearchRequest):
-    results = hybird_search(request.query)
+    # doc recall first
+    doc_results = search_doc(request.query)
+    logger.info(f"Document search results: {doc_results}")
+    if not doc_results:
+        raise HTTPException(status_code=404, detail="No documents found")
+
+    doc_ids = [doc['doc_id'] for doc in doc_results if 'doc_id' in doc]
+    results = hybird_search(request.query, doc_id_filters=doc_ids)
 
     if not results:
         raise HTTPException(status_code=404, detail="No results found")
@@ -1056,7 +1162,14 @@ def search_endpoint(request: SearchRequest):
 
 @app.post("/search/dense")
 def dense_search_endpoint(request: SearchRequest):
-    results = dense_search(request.query)
+    # doc recall first
+    doc_results = search_doc(request.query)
+    logger.info(f"Document search results: {doc_results}")
+    if not doc_results:
+        raise HTTPException(status_code=404, detail="No documents found")
+    doc_ids = [doc['doc_id'] for doc in doc_results if 'doc_id' in doc]
+    # 调用dense_search
+    results = dense_search(request.query, doc_id_filters=doc_ids)
 
     if not results:
         raise HTTPException(status_code=404, detail="No results found")
@@ -1073,7 +1186,13 @@ def dense_search_endpoint(request: SearchRequest):
 
 @app.post("/search/sparse")
 def sparse_search_endpoint(request: SearchRequest):
-    results = sparse_search(request.query)
+    # doc recall first
+    doc_results = search_doc(request.query)
+    logger.info(f"Document search results: {doc_results}")
+    if not doc_results:
+        raise HTTPException(status_code=404, detail="No documents found")
+    doc_ids = [doc['doc_id'] for doc in doc_results if 'doc_id' in doc]
+    results = sparse_search(request.query, doc_id_filters=doc_ids)
 
     if not results:
         raise HTTPException(status_code=404, detail="No results found")
@@ -1084,6 +1203,18 @@ def sparse_search_endpoint(request: SearchRequest):
             result['brief_context_html'] = fix_table_structure_advanced(result['brief_context_html'])
         if 'total_context_html' in result:
             result['total_context_html'] = fix_table_structure_advanced(result['total_context_html'])
+    
+    # 返回结果
+    return JSONResponse(content=results)
+
+@app.post("/search/doc")
+def search_doc_endpoint(request: SearchRequest):
+
+    results = search_doc(request.query)
+
+    if not results:
+        raise HTTPException(status_code=404, detail="No results found")
+    
     
     # 返回结果
     return JSONResponse(content=results)
