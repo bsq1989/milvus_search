@@ -282,7 +282,7 @@ class MilvusSearch:
 
             doc_prefix_segments[doc_id_prefix] = segments
         # merge segments
-        # doc_prefix_segments = {k: self._merge_segments(v) for k, v in doc_prefix_segments.items()}
+        doc_prefix_segments = {k: self._merge_segments(v) for k, v in doc_prefix_segments.items()}
 
         doc_prefix_context = {}
         for doc_id_prefix, segments in doc_prefix_segments.items():
@@ -780,8 +780,8 @@ def dense_search(query_test:str,doc_id_filters:List[str])->List[Dict]:
         doc_rerank_index = {}
         for doc_id ,result in search_re.items():
             for segment in result:
-                brief_context = segment.get('brief_context', '')
-                document_list.append(brief_context)
+                total_context = segment.get('total_context', '')
+                document_list.append(total_context)
                 rerank_id = f"{len(document_list)-1}"
                 doc_rerank_index[rerank_id] = segment
 
@@ -838,8 +838,8 @@ def sparse_search(query_test:str, doc_id_filters:List[str]) -> List[Dict]:
         doc_rerank_index = {}
         for doc_id ,result in search_re.items():
             for segment in result:
-                brief_context = segment.get('brief_context', '')
-                document_list.append(brief_context)
+                total_context = segment.get('total_context', '')
+                document_list.append(total_context)
                 rerank_id = f"{len(document_list)-1}"
                 doc_rerank_index[rerank_id] = segment
 
@@ -917,8 +917,8 @@ def hybird_search(query_test:str, doc_id_filters:List[str]) -> List[Dict]:
         doc_rerank_index = {}
         for doc_id ,result in search_re.items():
             for segment in result:
-                brief_context = segment.get('brief_context', '')
-                document_list.append(brief_context)
+                total_context = segment.get('total_context', '')
+                document_list.append(total_context)
                 rerank_id = f"{len(document_list)-1}"
                 doc_rerank_index[rerank_id] = segment
 
@@ -1014,6 +1014,8 @@ def search_doc(query_text: str) -> List[Dict]:
             segment = doc_rerank_index.get(r_id, {})
             segment['score'] = result.get('relevance_score', 0.0)
             final_results.append(segment)
+        # 过滤结果
+        logger.info(f"Doc search results: {(final_results)}")
         filtered_results = [res for res in final_results if res['score'] >= doc_filter_threshold]
         return filtered_results
 
@@ -1143,10 +1145,11 @@ def search_endpoint(request: SearchRequest):
     # doc recall first
     doc_results = search_doc(request.query)
     logger.info(f"Document search results: {doc_results}")
-    if not doc_results:
-        raise HTTPException(status_code=404, detail="No documents found")
+    # if not doc_results:
+    #     raise HTTPException(status_code=404, detail="No documents found")
 
     doc_ids = [doc['doc_id'] for doc in doc_results if 'doc_id' in doc]
+    logger.info(f"Document IDs for hybrid search: {doc_ids}")
     results = hybird_search(request.query, doc_id_filters=doc_ids)
 
     if not results:
@@ -1165,9 +1168,10 @@ def dense_search_endpoint(request: SearchRequest):
     # doc recall first
     doc_results = search_doc(request.query)
     logger.info(f"Document search results: {doc_results}")
-    if not doc_results:
-        raise HTTPException(status_code=404, detail="No documents found")
+    # if not doc_results:
+    #     raise HTTPException(status_code=404, detail="No documents found")
     doc_ids = [doc['doc_id'] for doc in doc_results if 'doc_id' in doc]
+    logger.info(f"Document IDs for dense search: {doc_ids}")
     # 调用dense_search
     results = dense_search(request.query, doc_id_filters=doc_ids)
 
@@ -1189,9 +1193,10 @@ def sparse_search_endpoint(request: SearchRequest):
     # doc recall first
     doc_results = search_doc(request.query)
     logger.info(f"Document search results: {doc_results}")
-    if not doc_results:
-        raise HTTPException(status_code=404, detail="No documents found")
+    # if not doc_results:
+    #     raise HTTPException(status_code=404, detail="No documents found")
     doc_ids = [doc['doc_id'] for doc in doc_results if 'doc_id' in doc]
+    logger.info(f"Document IDs for sparse search: {doc_ids}")
     results = sparse_search(request.query, doc_id_filters=doc_ids)
 
     if not results:
@@ -1211,7 +1216,7 @@ def sparse_search_endpoint(request: SearchRequest):
 def search_doc_endpoint(request: SearchRequest):
 
     results = search_doc(request.query)
-
+    logger.info(f"Document search results: {results}")
     if not results:
         raise HTTPException(status_code=404, detail="No results found")
     
@@ -1225,3 +1230,9 @@ if __name__ == "__main__":
 
     # 启动FastAPI应用
     uvicorn.run(app, host="0.0.0.0", port=10005, log_level="info")
+
+    # doc_results = search_doc("MOJITO 自研分布式服务框架")
+# 
+    # doc_ids = [doc['doc_id'] for doc in doc_results if 'doc_id' in doc]
+# 
+    # results = hybird_search("MOJITO 自研分布式服务框架", doc_id_filters=doc_ids)
