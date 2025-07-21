@@ -26,6 +26,92 @@ console_handler.setFormatter(formatter)
 logger.addHandler(handler)
 logger.addHandler(console_handler)
 
+class MilvusDocCacheByDocId:
+    def __init__(self, engine: MilvusVectorDB, doc_id_prefix: str, pivot_id: int, expansion_budget: int = 200):
+        self.engine = engine
+        self.cache = {}
+        self.doc_id_prefix = doc_id_prefix
+        self.pivot_id = pivot_id
+        self.expansion_budget = expansion_budget
+        self.start_position = pivot_id
+        self.end_position = pivot_id
+        self.init = self._init_cache()
+    
+    def _init_cache(self):
+        if self.pivot_id:
+            id_start = self.pivot_id - int(self.expansion_budget/2)
+            id_end = self.pivot_id + int(self.expansion_budget/2)
+            if id_start < 0:
+                id_start = 0
+            doc_ids = [f"{self.doc_id_prefix}_{i}" for i in range(id_start, id_end + 1)]
+            query_results = self.engine.query_by_doc_ids(
+                doc_ids=doc_ids
+            )
+            for entity in query_results:
+                self.cache[entity.get('doc_id')] = entity
+            if len(query_results) == 0:
+                self.start_position = id_start
+                self.end_position = id_end
+            else:
+                self.start_position = query_results[0].get('id', self.pivot_id)
+                start_doc_id = query_results[0].get('doc_id')
+                self.start_position = int(start_doc_id.split('_')[1])
+                end_doc_id = query_results[-1].get('doc_id')
+                self.end_position = int(end_doc_id.split('_')[1])
+
+            return True
+        else:
+            return False
+        
+    def initialized(self):
+        return self.init
+    
+    def get_entity(self, doc_id: str):
+        """
+        Get the entity from the cache or fetch it from the database if not cached.
+        :param doc_id: The document ID to retrieve.
+        :return: The entity corresponding to the document ID.
+        """
+        if doc_id in self.cache:
+            return self.cache[doc_id]
+        else:
+            return None
+        
+    def do_expansion(self):
+        """
+        Expand the cache by fetching entities around the pivot ID.
+        :return: A list of entities fetched from the database.
+        """
+        if not self.initialized():
+            return False
+        
+        id_start = self.start_position - int(self.expansion_budget/2)
+        id_end = self.end_position + int(self.expansion_budget/2)
+        if id_start < 0:
+            id_start = 0
+        doc_ids_upper = [f"{self.doc_id_prefix}_{i}" for i in range(id_start, self.start_position)]
+        doc_ids_lower = [f"{self.doc_id_prefix}_{i}" for i in range(self.end_position + 1, id_end + 1)]
+
+        upper_results = self.engine.query_by_doc_ids(
+            doc_ids=doc_ids_upper
+        )
+
+        lower_results = self.engine.query_by_doc_ids(
+            doc_ids=doc_ids_lower
+        )
+
+        # refresh the cache
+        for entity in upper_results:
+            self.cache[entity.get('doc_id')] = entity
+        for entity in lower_results:
+            self.cache[entity.get('doc_id')] = entity
+        if upper_results and len(upper_results) > 0:
+            start_doc_id = upper_results[0].get('doc_id')
+            self.start_position = int(start_doc_id.split('_')[1])
+        if lower_results and len(lower_results) > 0:
+            end_doc_id = lower_results[-1].get('doc_id')
+            self.end_position = int(end_doc_id.split('_')[1])
+
 class MilvusDocCache:
 
     def __init__(self, engine: MilvusVectorDB, pivot_id: int, expansion_budget: int = 200):
@@ -48,8 +134,13 @@ class MilvusDocCache:
             )
             for entity in query_results:
                 self.cache[entity.get('doc_id')] = entity
-            self.start_position = query_results[0].get('id', self.pivot_id)
-            self.end_position = query_results[-1].get('id', self.pivot_id)
+            if len(query_results) == 0:
+                self.start_position = id_start
+                self.end_position = id_end
+            else:
+                self.start_position = query_results[0].get('id', self.pivot_id)
+                self.end_position = query_results[-1].get('id', self.pivot_id)
+
             return True
         else:
             return False
@@ -95,8 +186,12 @@ class MilvusDocCache:
             self.cache[entity.get('doc_id')] = entity
         if upper_results and len(upper_results) > 0:
             self.start_position = upper_results[0].get('id', self.pivot_id)
+        else:
+            self.start_position = id_start
         if lower_results and len(lower_results) > 0:
             self.end_position = lower_results[-1].get('id', self.pivot_id)
+        else:
+            self.end_position = id_end
 
 
 class MilvusSearch:
@@ -233,34 +328,32 @@ class MilvusSearch:
             if not doc_id:
                 continue
             doc_id_prefix = doc_id.split('_')[0]
+            doc_id_index = int(doc_id.split('_')[1])
             cache_item = cache_dict.get(doc_id_prefix, None)
             if cache_item is None:
                 cache_item = {}
-                cache_item['poviots'] = [entity.get('id')]
+                cache_item['poviots'] = [doc_id_index]
             else:
-                cache_item['poviots'].append(entity.get('id'))
+                cache_item['poviots'].append(doc_id_index)
             cache_dict[doc_id_prefix] = cache_item
 
         # 初始化cache
         for doc_id_prefix, cache_item in cache_dict.items():
-            if 'poviots' not in cache_item:
-                cache_item['poviots'] = []
-                cache_item['cache'] = None
-                cache_dict[doc_id_prefix] = cache_item
-            else:
-                pivots = cache_item['poviots']
-                avg_pivot = int(sum(pivots) / len(pivots))
-                cache_engine = MilvusDocCache(
-                    engine=self.milvus_db,
-                    pivot_id=avg_pivot,
-                    expansion_budget=300
-                )
-                if cache_engine.initialized():
-                    cache_item['cache'] = cache_engine
-                else:
-                    cache_item['cache'] = None
+        
+           pivots = cache_item['poviots']
+           avg_pivot = int(sum(pivots) / len(pivots))
+           cache_engine = MilvusDocCacheByDocId(
+               engine=self.milvus_db,
+               pivot_id=avg_pivot,
+               doc_id_prefix=doc_id_prefix,
+               expansion_budget=200
+           )
+           if cache_engine.initialized():
+               cache_item['cache'] = cache_engine
+           else:
+               cache_item['cache'] = None
 
-                cache_dict[doc_id_prefix] = cache_item
+           cache_dict[doc_id_prefix] = cache_item
 
         
         for result_data, score in rrf_fusion_results:
@@ -394,7 +487,7 @@ class MilvusSearch:
             if start <= current_end + 1:
                 current_end = max(current_end, end)
             else:
-                merged_segments.append((current_start, current_end, index))
+                merged_segments.append((current_start, current_end, (current_start + current_end) // 2))
                 current_start, current_end = start, end
         merged_segments.append((current_start, current_end, (current_start + current_end) // 2))
         return merged_segments
