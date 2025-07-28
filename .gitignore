@@ -7,3 +7,5 @@
 *.sqlite
 *.tar
 *.tar.gz
+.DS_Store
+.vscode*
