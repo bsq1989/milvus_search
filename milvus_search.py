@@ -844,6 +844,8 @@ def dense_search(query_test:str,doc_id_filters:List[str])->List[Dict]:
     rerank_model = global_config.get('rerank_model')
     dense_search_limit = global_config.get('dense_search_limit', 10)
     search_total_budget = global_config.get('search_total_budget', 4000)
+    search_rerank_threshold = global_config.get('search_rerank_threshold', 0.1)
+
     pool = get_global_pool(max_pool_size=10, max_idle_time=300)
     with pool.get_instance_context(
         uri=milvus_uri, 
@@ -897,7 +899,7 @@ def dense_search(query_test:str,doc_id_filters:List[str])->List[Dict]:
             segment['score'] = result.get('relevance_score', 0.0)
             segment['id'] = rerank_id
             final_results.append(segment)
-
+        final_results = [res for res in final_results if res['score'] >= search_rerank_threshold]
         return final_results
 
 def sparse_search(query_test:str, doc_id_filters:List[str]) -> List[Dict]:
@@ -910,6 +912,8 @@ def sparse_search(query_test:str, doc_id_filters:List[str]) -> List[Dict]:
     rerank_model = global_config.get('rerank_model')
     search_total_budget = global_config.get('search_total_budget', 4000)
     pool = get_global_pool(max_pool_size=10, max_idle_time=300)
+    search_rerank_threshold = global_config.get('search_rerank_threshold', 0.1)
+
     with pool.get_instance_context(
         uri=milvus_uri, 
         token=milvus_token, 
@@ -955,7 +959,7 @@ def sparse_search(query_test:str, doc_id_filters:List[str]) -> List[Dict]:
             segment['score'] = result.get('relevance_score', 0.0)
             segment['id'] = rerank_id
             final_results.append(segment)
-
+        final_results = [res for res in final_results if res['score'] >= search_rerank_threshold]
         return final_results
 
 def hybird_search(query_test:str, doc_id_filters:List[str]) -> List[Dict]:
@@ -972,7 +976,9 @@ def hybird_search(query_test:str, doc_id_filters:List[str]) -> List[Dict]:
     dense_search_limit = global_config.get('dense_search_limit', 10)
     sparse_search_limit = global_config.get('sparse_search_limit', 10)
     search_total_budget = global_config.get('search_total_budget', 4000)
+    search_rerank_threshold = global_config.get('search_rerank_threshold', 0.1)
     pool = get_global_pool(max_pool_size=10, max_idle_time=300)
+
     with pool.get_instance_context(
         uri=milvus_uri, 
         token=milvus_token, 
@@ -1034,7 +1040,8 @@ def hybird_search(query_test:str, doc_id_filters:List[str]) -> List[Dict]:
             segment['score'] = result.get('relevance_score', 0.0)
             segment['id'] = rerank_id
             final_results.append(segment)
-
+        # 过滤结果
+        final_results = [res for res in final_results if res['score'] >= search_rerank_threshold]
         return final_results
         
 
@@ -1236,14 +1243,14 @@ class SearchRequest(BaseModel):
 @app.post("/search")
 def search_endpoint(request: SearchRequest):
     # doc recall first
-    doc_results = search_doc(request.query)
-    logger.info(f"Document search results: {doc_results}")
+    # doc_results = search_doc(request.query)
+    # logger.info(f"Document search results: {doc_results}")
     # if not doc_results:
     #     raise HTTPException(status_code=404, detail="No documents found")
 
-    doc_ids = [doc['doc_id'] for doc in doc_results if 'doc_id' in doc]
-    logger.info(f"Document IDs for hybrid search: {doc_ids}")
-    results = hybird_search(request.query, doc_id_filters=doc_ids)
+    # doc_ids = [doc['doc_id'] for doc in doc_results if 'doc_id' in doc]
+    # logger.info(f"Document IDs for hybrid search: {doc_ids}")
+    results = hybird_search(request.query, doc_id_filters=[])
 
     if not results:
         raise HTTPException(status_code=404, detail="No results found")
@@ -1259,14 +1266,14 @@ def search_endpoint(request: SearchRequest):
 @app.post("/search/dense")
 def dense_search_endpoint(request: SearchRequest):
     # doc recall first
-    doc_results = search_doc(request.query)
-    logger.info(f"Document search results: {doc_results}")
+    # doc_results = search_doc(request.query)
+    # logger.info(f"Document search results: {doc_results}")
     # if not doc_results:
     #     raise HTTPException(status_code=404, detail="No documents found")
-    doc_ids = [doc['doc_id'] for doc in doc_results if 'doc_id' in doc]
-    logger.info(f"Document IDs for dense search: {doc_ids}")
+    # doc_ids = [doc['doc_id'] for doc in doc_results if 'doc_id' in doc]
+    # logger.info(f"Document IDs for dense search: {doc_ids}")
     # 调用dense_search
-    results = dense_search(request.query, doc_id_filters=doc_ids)
+    results = dense_search(request.query, doc_id_filters=[])
 
     if not results:
         raise HTTPException(status_code=404, detail="No results found")
@@ -1284,13 +1291,13 @@ def dense_search_endpoint(request: SearchRequest):
 @app.post("/search/sparse")
 def sparse_search_endpoint(request: SearchRequest):
     # doc recall first
-    doc_results = search_doc(request.query)
-    logger.info(f"Document search results: {doc_results}")
+    # doc_results = search_doc(request.query)
+    # logger.info(f"Document search results: {doc_results}")
     # if not doc_results:
     #     raise HTTPException(status_code=404, detail="No documents found")
-    doc_ids = [doc['doc_id'] for doc in doc_results if 'doc_id' in doc]
-    logger.info(f"Document IDs for sparse search: {doc_ids}")
-    results = sparse_search(request.query, doc_id_filters=doc_ids)
+    # doc_ids = [doc['doc_id'] for doc in doc_results if 'doc_id' in doc]
+    # logger.info(f"Document IDs for sparse search: {doc_ids}")
+    results = sparse_search(request.query, doc_id_filters=[])
 
     if not results:
         raise HTTPException(status_code=404, detail="No results found")

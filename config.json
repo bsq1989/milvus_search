@@ -14,5 +14,6 @@
     "dense_search_limit": 10,
     "sparse_search_limit": 10,
     "search_total_budget": 4000,
-    "doc_filter_threshold": 0.01
+    "doc_filter_threshold": 0.01,
+    "search_rerank_threshold": 0.1
 }
